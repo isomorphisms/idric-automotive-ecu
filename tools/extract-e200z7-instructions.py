@@ -4,8 +4,8 @@
 Usage:
   extract-e200z7-instructions.py CORE.pdf VLEPEM.pdf SPEPEM.pdf [output-dir]
 
-Canonical pdftotext section snapshots are retained.  Normalized mnemonic lists
-are navigation aids only; they never replace the source sections.
+The canonical extracted manual sections are the completeness oracle.  Any
+normalized name list is only a navigation view and is labelled accordingly.
 """
 
 from __future__ import annotations
@@ -26,14 +26,22 @@ def pdf_text(pdf: Path) -> str:
         return out.read_text(encoding="utf-8", errors="replace")
 
 
-def between(text: str, start: str, end: str, label: str) -> str:
-    a = text.find(start)
-    if a < 0:
-        raise SystemExit(f"{label}: missing start marker {start!r}")
-    b = text.find(end, a + len(start))
-    if b < 0:
-        raise SystemExit(f"{label}: missing end marker {end!r}")
-    return text[a:b]
+def between_re(
+    text: str,
+    start_pattern: str,
+    end_pattern: str,
+    label: str,
+    *,
+    last_start: bool = False,
+) -> str:
+    starts = list(re.finditer(start_pattern, text, re.MULTILINE | re.DOTALL))
+    if not starts:
+        raise SystemExit(f"{label}: missing start pattern {start_pattern!r}")
+    start = starts[-1] if last_start else starts[0]
+    end = re.search(end_pattern, text[start.end():], re.MULTILINE | re.DOTALL)
+    if end is None:
+        raise SystemExit(f"{label}: missing end pattern {end_pattern!r}")
+    return text[start.start(): start.end() + end.start()]
 
 
 def first_tokens(block: str, allowed: re.Pattern[str]) -> list[str]:
@@ -43,7 +51,6 @@ def first_tokens(block: str, allowed: re.Pattern[str]) -> list[str]:
         if not line:
             continue
         token = line.split()[0].rstrip(',')
-        # Expand comma-separated table cells when pdftotext keeps them together.
         for part in token.split(','):
             part = part.strip().rstrip(',')
             if allowed.fullmatch(part):
@@ -62,7 +69,7 @@ def repeated_headings(block: str, allowed: re.Pattern[str]) -> list[str]:
 
 def write_list(path: Path, names: list[str]) -> None:
     if not names:
-        raise SystemExit(f"empty normalized instruction list for {path.name}")
+        raise SystemExit(f"empty navigation index for {path.name}")
     path.write_text("\n".join(names) + "\n", encoding="utf-8")
 
 
@@ -80,79 +87,104 @@ def main() -> int:
     vle = pdf_text(vle_pdf)
     spe = pdf_text(spe_pdf)
 
-    # e200z7 core manual explicitly says Table 4-4 gives detailed timing for
-    # each instruction mnemonic.  Stop at 4.8 so later prose cannot pollute it.
-    core_44 = between(
+    # The core manual says Table 4-4 gives detailed timing for each instruction
+    # mnemonic.  Preserve the full table, not just tokens extracted from it.
+    core_44 = between_re(
         core,
-        "Table 4-4. Instruction Timing by Mnemonic",
-        "4.8 Operand Placement on Performance",
+        r"Table 4-4\.\s+Instruction Timing by Mnemonic",
+        r"4\.8\s+Operand Placement on Performance",
         "e200z7 core Table 4-4",
     )
     (out / "core-table-4-4.txt").write_text(core_44, encoding="utf-8")
     base_rx = re.compile(r"[a-z][a-z0-9_.]*(?:\[[a-z.]+\])*")
     core_names = first_tokens(core_44, base_rx)
-    # Filter obvious table/prose tokens that survive first-column extraction.
     reject = {
         "mnemonic", "latency", "serialization", "table", "continued",
         "freescale", "instruction", "e200z7",
     }
     core_names = [x for x in core_names if x not in reject]
-    write_list(out / "core-mnemonics.txt", core_names)
+    write_list(out / "core-mnemonic-index.txt", core_names)
 
-    # Chapter 5 contains target-specific EFPU v2 instruction description pages.
-    # Repeated heading form "efsabs efsabs" / "evfsabs evfsabs" is stable and
-    # avoids counting mere prose references.
-    efpu = between(core, "Chapter 5\nEmbedded Floating-Point Unit", "Chapter 6\nSignal Processing Extension", "e200z7 EFPU chapter")
+    # Chapter 5 is the target-specific EFPU-v2 authority.  Preserve it whole;
+    # the efs*/evfs* index is only a fast lookup view.
+    efpu = between_re(
+        core,
+        r"Chapter 5\s+Embedded Floating-Point Unit",
+        r"Chapter 6\s+Signal Processing Extension",
+        "e200z7 EFPU chapter",
+    )
     (out / "efpu-chapter-5.txt").write_text(efpu, encoding="utf-8")
     efpu_rx = re.compile(r"(?:efs|evfs)[a-z0-9_.]+")
-    efpu_names = repeated_headings(efpu, efpu_rx)
-    # Also retain opcode/timing-table-only names in case a form lacks a repeated
-    # description heading in a future PDF layout.
-    efpu_names = sorted(set(efpu_names) | set(first_tokens(efpu, efpu_rx)))
-    write_list(out / "efpu-mnemonics.txt", efpu_names)
+    efpu_names = sorted(
+        set(repeated_headings(efpu, efpu_rx)) | set(first_tokens(efpu, efpu_rx))
+    )
+    write_list(out / "efpu-mnemonic-index.txt", efpu_names)
 
-    # VLEPEM Appendix B says it lists all VLE instructions by mnemonic/opcode.
-    vle_b = between(
+    # VLEPEM Appendix B says it lists all instructions available in VLE mode.
+    # Use the actual B.1 occurrence, not the TOC mention, and preserve B.1+B.2
+    # through the real Index heading.  The e_/se_ view is intentionally partial.
+    vle_b = between_re(
         vle,
-        "Appendix B\nVLE Instruction Set Tables",
-        "Index",
+        r"^\s*B\.1\s+VLE Instruction Set Sorted by Mnemonic\s*$",
+        r"^\s*Index\s*$",
         "VLE Appendix B",
+        last_start=True,
     )
     (out / "vle-appendix-b.txt").write_text(vle_b, encoding="utf-8")
     vle_rx = re.compile(r"(?:se|e)_[a-z0-9_.]+")
-    vle_names = sorted(set(vle_rx.findall(vle_b)))
-    write_list(out / "vle-mnemonics.txt", vle_names)
+    vle_prefixed = sorted(set(vle_rx.findall(vle_b)))
+    write_list(out / "vle-prefixed-mnemonic-index.txt", vle_prefixed)
 
     # SPEPEM Appendix B says it lists all SPE and embedded-FP instructions.
-    spe_b = between(
+    # Preserve the complete appendix; the prefix view below is not advertised as
+    # exhaustive because Appendix B also contains simplified/alias spellings.
+    spe_b = between_re(
         spe,
-        "Appendix B\nSPE and Embedded Floating-Point Opcode Listings",
-        "Index",
+        r"^\s*B\.1\s+Instructions \(Binary\) by Mnemonic\s*$",
+        r"^\s*Index\s*$",
         "SPE Appendix B",
+        last_start=True,
     )
     (out / "spe-appendix-b.txt").write_text(spe_b, encoding="utf-8")
-    # Most real/simplified SPE/EFPU names are ev*/ef*, with brinc the notable
-    # non-ev operation called out by the manual.  Keep both real and simplified
-    # spellings; the raw appendix preserves encoding/alias identity.
     spe_rx = re.compile(r"(?:ev|ef)[a-z0-9_.]+|brinc")
-    spe_names = sorted(set(spe_rx.findall(spe_b)))
-    write_list(out / "spe-mnemonics.txt", spe_names)
+    spe_prefixed = sorted(set(spe_rx.findall(spe_b)))
+    write_list(out / "spe-prefixed-mnemonic-index.txt", spe_prefixed)
 
     manifest = {
         "manuals": {
-            "core": {"title": "e200z7 Power Architecture Core Reference Manual, Rev. 2", "sha256": hashlib.sha256(core_pdf.read_bytes()).hexdigest()},
-            "vle": {"title": "VLE Programming Environments Manual, Rev. 0", "sha256": hashlib.sha256(vle_pdf.read_bytes()).hexdigest()},
-            "spe": {"title": "SPE Programming Environments Manual, Rev. 0", "sha256": hashlib.sha256(spe_pdf.read_bytes()).hexdigest()},
+            "core": {
+                "title": "e200z7 Power Architecture Core Reference Manual, Rev. 2",
+                "sha256": hashlib.sha256(core_pdf.read_bytes()).hexdigest(),
+            },
+            "vle": {
+                "title": "VLE Programming Environments Manual, Rev. 0",
+                "sha256": hashlib.sha256(vle_pdf.read_bytes()).hexdigest(),
+            },
+            "spe": {
+                "title": "SPE Programming Environments Manual, Rev. 0",
+                "sha256": hashlib.sha256(spe_pdf.read_bytes()).hexdigest(),
+            },
         },
-        "counts": {
-            "core_mnemonic_rows": len(core_names),
-            "efpu_mnemonics": len(efpu_names),
-            "vle_mnemonics": len(vle_names),
-            "spe_and_embedded_fp_names": len(spe_names),
+        "canonical_complete_sections": [
+            "core-table-4-4.txt",
+            "efpu-chapter-5.txt",
+            "vle-appendix-b.txt",
+            "spe-appendix-b.txt",
+        ],
+        "navigation_index_counts": {
+            "core_mnemonic_index": len(core_names),
+            "efpu_mnemonic_index": len(efpu_names),
+            "vle_e_se_prefixed_index": len(vle_prefixed),
+            "spe_ev_ef_prefixed_index": len(spe_prefixed),
         },
-        "note": "canonical extracted text blocks are the completeness oracle; normalized lists are convenience indexes",
+        "note": (
+            "canonical extracted text blocks are the completeness oracle; "
+            "normalized/prefix lists are convenience indexes only"
+        ),
     }
-    (out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (out / "manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     return 0
 
 
