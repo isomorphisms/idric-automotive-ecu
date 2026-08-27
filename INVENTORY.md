@@ -24,8 +24,8 @@ For large ISAs, use a pinned reproducible extractor rather than a hand-maintaine
 | Branch | Architecture boundary |
 | --- | --- |
 | `follower/arm-cortex-m7-s32k3` | S32K3-class Cortex-M7: Armv7E-M / Thumb-2 plus the exact implemented DSP/FPU profile |
-| `follower/power-e200z7` | Power Architecture e200z7, including VLE and SPE facilities present on the pinned target |
-| `follower/rh850` | Exact RH850 core generation must be pinned before the inventory can be declared complete |
+| `follower/power-e200z7` | Power Architecture e200z7, including the core Power, VLE, SPE and target-specific EFPU-v2 surfaces |
+| `follower/rh850` | Separate complete RH850 G3M, G3K, G3MH, G3KH and G4MH architecture inventories; an executable Idriç backend must still pin one exact core profile |
 | `reference/tricore-tc18` | Infineon TriCore TC1.8 reference architecture |
 
 Follower/reference status controls implementation priority only; it does not relax the architecture-inventory requirement.
