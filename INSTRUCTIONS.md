@@ -21,11 +21,11 @@ The inventory retains all of Table 4-4, including privileged/system, cache/TLB, 
 
 Canonical architecture source: **Variable-Length Encoding (VLE) Programming Environments Manual**, `VLEPEM`, Rev. 0, 07/2007.
 
-The manual describes VLE as an extension to the base and embedded categories of the Power ISA. Its Appendix B explicitly **lists all VLE instructions**, first grouped by mnemonic and then by opcode. The complete VLE inventory is therefore the entire Appendix-B instruction table, preserving:
+The manual describes VLE as an extension to the base and embedded categories of the Power ISA. Its Appendix B explicitly **lists all instructions available in VLE mode**, first grouped by mnemonic and then by opcode. The complete VLE inventory is therefore the entire Appendix-B instruction table, preserving:
 
 - every 16-bit `se_*` encoding;
 - every 32-bit `e_*` encoding;
-- supported non-VLE Power instructions listed by the manual where relevant to mixed VLE execution;
+- supported non-VLE Power instructions listed by the manual for VLE mode;
 - instruction format, opcode, privilege/mode and alias/simplified-mnemonic information.
 
 Do not flatten a VLE spelling into a normal 32-bit Power instruction merely because the operation is semantically similar.
@@ -54,15 +54,21 @@ The target-specific inventory is every `efs*` and `evfs*` instruction descriptio
 
 ## Reproducible extraction
 
-`tools/extract-e200z7-instructions.py CORE.pdf VLEPEM.pdf SPEPEM.pdf [output-dir]` runs `pdftotext -layout` and preserves the canonical manual sections before producing normalized convenience indexes:
+`tools/extract-e200z7-instructions.py CORE.pdf VLEPEM.pdf SPEPEM.pdf [output-dir]` runs `pdftotext -layout` and preserves these four **complete canonical sections**:
 
-- `core-table-4-4.txt` and `core-mnemonics.txt`;
-- `efpu-chapter-5.txt` and `efpu-mnemonics.txt`;
-- `vle-appendix-b.txt` and `vle-mnemonics.txt`;
-- `spe-appendix-b.txt` and `spe-mnemonics.txt`;
-- a manifest with hashes/counts.
+- `core-table-4-4.txt`;
+- `efpu-chapter-5.txt`;
+- `vle-appendix-b.txt`;
+- `spe-appendix-b.txt`.
 
-Generation fails if the required manual section markers are missing or any normalized instruction set is empty. The preserved canonical text blocks are the completeness oracle; the convenience token indexes never replace them.
+It also emits navigation indexes:
+
+- `core-mnemonic-index.txt`;
+- `efpu-mnemonic-index.txt`;
+- `vle-prefixed-mnemonic-index.txt` — only the `e_` / `se_` subset of the complete VLE appendix;
+- `spe-prefixed-mnemonic-index.txt` — a quick `ev*` / `ef*` / `brinc` lookup view, not a replacement for the complete SPE appendix.
+
+Generation fails if the required manual sections are missing or a navigation extraction is empty. The preserved canonical manual sections—not the filtered indexes—are the completeness oracle.
 
 ## Idriç support
 
